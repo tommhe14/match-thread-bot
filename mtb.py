@@ -144,7 +144,7 @@ def loadMarkup(subreddit):
 	try:
 		markup = [line.rstrip('\n') for line in open(subreddit + '.txt')]
 	except:
-		markup = [line.rstrip('\n') for line in open('mane-test.txt')]
+		markup = [line.rstrip('\n') for line in open('soccer.txt')]
 	return markup
 	
 def getBotStatus():
@@ -724,7 +724,7 @@ def createMatchInfo(team1, team2):
         body += markup[lines] + ' '
         body = writeLineUps('soccer', body, t1, t1id, t2, t2id, team1Start, team1Sub, team2Start, team2Sub)
         
-        events = grabEvents(matchID, "mane-test")
+        events = grabEvents(matchID, 'soccer')
         body += '\n\n------------\n\n' + markup[evnts] + ' **MATCH EVENTS**\n\n' + events
         
         logger.info("Provided info for %s vs %s", t1, t2)
