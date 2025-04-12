@@ -93,6 +93,7 @@ def setup():
                 print(getTimestamp() + "Setup error: please ensure 'login.txt' file exists in its correct form (check readme for more info)\n")
                 logger.exception("[SETUP ERROR:]")
                 sleep(10)
+
 	
 # save activeThreads
 def saveData():
@@ -143,7 +144,7 @@ def loadMarkup(subreddit):
 	try:
 		markup = [line.rstrip('\n') for line in open(subreddit + '.txt')]
 	except:
-		markup = [line.rstrip('\n') for line in open('soccer.txt')]
+		markup = [line.rstrip('\n') for line in open('mane-test.txt')]
 	return markup
 	
 def getBotStatus():
@@ -154,17 +155,12 @@ def getBotStatus():
 	
 # get current match time/status
 def getStatus(matchID):
-	lineAddress = "http://www.espn.com/soccer/match?gameId=" + matchID
-	lineWebsite = requests.get(lineAddress, timeout=15)
-	line_html = lineWebsite.text
-	if lineWebsite.status_code == 200:
-		status = re.findall('<span class="game-time".*?>(.*?)<',line_html,re.DOTALL)
-		if status == []:
-			return 'v'
-		else:
-			return status[0]
-	else:
-		return ''
+    venue, ko_day, ko_time, status, comp = getMatchSummary(matchID)
+
+    if status:  
+        return status
+    else:
+        return 'v' 
 	
 def remove_accents(input_str):
     nfkd_form = unicodedata.normalize('NFKD', input_str)
@@ -184,241 +180,268 @@ def guessRightMatch(possibles):
 	else:
 		guess = possibles[0]
 	return guess
+
+def fetch_espn_scoreboard():
+    url = "https://site.web.api.espn.com/apis/v2/scoreboard/header?region=gb&lang=en&contentorigin=espn&buyWindow=1m&showAirings=buy,live,replay&showZipLookup=true&tz=Europe/London&_ceID=15878776"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Failed to fetch data. Status code: {response.status_code}")
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"Error during the request: {e}")
+        return None
 	
 def findMatchSite(team1, team2):
-	# search for each word in each team name in the fixture list, return most frequent result
-	print(getTimestamp() + "Finding ESPN site for " + team1 + " vs " + team2 + "...", end='')
-	starttime = datetime.datetime.now()
-	try:
-		t1 = team1.split()
-		t2 = team2.split()
-		linkList = []
-		fixAddress = "http://www.espn.com/soccer/scoreboard"
-		fixWebsite = requests.get(fixAddress, timeout=15)
-		fix_html = fixWebsite.text
-		matches = fix_html.split('window.espn.scoreboardData')[1]
-		matches = matches.split('<body class="scoreboard')[0]
-		names = matches.split('"text":"Statistics"')
-		del names[-1]
-		for match in names:
-			check = True
-			matchID = re.findall('"homeAway":.*?"href":".*?gameId(?:=|/)(.*?)",', match, re.DOTALL)[0][0:6]
-			homeTeam = re.findall('"homeAway":"home".*?"team":{.*?"alternateColor".*?"displayName":"(.*?)"', match, re.DOTALL)
-			if len(homeTeam) > 0:
-				homeTeam = homeTeam[0]
-			else:
-				check = False
-			awayTeam = re.findall('"homeAway":"away".*?"team":{.*?"alternateColor".*?"displayName":"(.*?)"', match, re.DOTALL)
-			if len(awayTeam) > 0:
-				awayTeam = awayTeam[0]
-			else:
-				check = False
-			if check:
-				for word in t1:
-					if remove_accents(homeTeam.lower()).find(remove_accents(word.lower())) != -1:
-						linkList.append(matchID)
-					if remove_accents(awayTeam.lower()).find(remove_accents(word.lower())) != -1:
-						linkList.append(matchID)
-				for word in t2:
-					if remove_accents(homeTeam.lower()).find(remove_accents(word.lower())) != -1:
-						linkList.append(matchID)
-					if remove_accents(awayTeam.lower()).find(remove_accents(word.lower())) != -1:
-						linkList.append(matchID)		
-		counts = Counter(linkList)
-		if counts.most_common(1) != []:
-			#freqs = groupby(counts.most_common(), lambda x:x[1])
-			possibles = []
-			for val,grp in groupby(counts.most_common(), lambda x:x[0]):
-				possibles.append(val)
-				if len(possibles) > 1:
-					mode = guessRightMatch(possibles)
-				else:
-					mode = possibles[0]
-			endtime = datetime.datetime.now()
-			timeelapsed = endtime - starttime
-			print("complete (" + str(timeelapsed.seconds) + " seconds)")
-			return mode
-		else:
-			endtime = datetime.datetime.now()
-			timeelapsed = endtime - starttime
-			print("complete (" + str(timeelapsed.seconds) + " seconds)")
-			return 'no match'
-	except requests.exceptions.Timeout:
-		print("ESPN access timeout")
-		return 'no match'
+    print(getTimestamp() + "Finding ESPN match for " + team1 + " vs " + team2 + "...", end='')
+    starttime = datetime.datetime.now()
 
+    try:
+        data = fetch_espn_scoreboard()
+        if not data:
+            return 'no match'
+
+        # Normalize the input team names to lowercase
+        t1 = team1.lower()
+        t2 = team2.lower()
+
+        linkList = []
+        for sport in data.get("sports", []):
+            for league in sport.get("leagues", []):
+                for event in league.get("events", []):
+                    home_team = event["competitors"][0]["displayName"].lower()
+                    away_team = event["competitors"][1]["displayName"].lower()
+                    match_id = event["id"]
+
+                    # Check if the provided team1 name exists in home or away teams
+                    if (t1.lower().strip() in home_team.lower() or t1.lower().strip() in away_team.lower()) and (t2.lower().strip() in home_team.lower() or t2.lower().strip() in away_team.lower()):
+                        linkList.append(match_id)
+                        print(f"Match found and appended: {home_team} vs {away_team} (ID: {match_id})")
+
+        # If matches are found, get the most common match ID
+        if linkList:
+            counts = Counter(linkList)
+            most_common_match_id = counts.most_common(1)[0][0]
+            endtime = datetime.datetime.now()
+            timeelapsed = endtime - starttime
+            print(f"complete ({str(timeelapsed.seconds)} seconds)")
+            return most_common_match_id
+        else:
+            endtime = datetime.datetime.now()
+            timeelapsed = endtime - starttime
+            print(f"complete ({str(timeelapsed.seconds)} seconds)")
+            return 'no match'
+
+    except requests.exceptions.Timeout:
+        print("ESPN access timeout")
+        return 'no match'
+	
 def getTeamIDs(matchID):
-	try:
-		lineAddress = "http://www.espn.com/soccer/match?gameId=" + matchID	
-		lineWebsite = requests.get(lineAddress, timeout=15)
-		line_html = lineWebsite.text
-		
-		teamIDs = re.findall('<div class="team-info">(.*?)</div>', line_html, re.DOTALL)
-		if teamIDs != []:
-			t1id = re.findall('/(?:club|team)/.*?/.*?/(.*?)"',teamIDs[0],re.DOTALL)
-			t2id = re.findall('/(?:club|team)/.*?/.*?/(.*?)"',teamIDs[1],re.DOTALL)
-			if t1id != []:
-				t1id = t1id[0]
-			else:
-				t1id = ''
-			if t2id != []:
-				t2id = t2id[0]
-			else:
-				t2id = ''
-			return t1id,t2id
-		else:
-			return '',''
-	except requests.exceptions.Timeout:
-		return '','' 
+    url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            match_data = response.json()
+            
+            events = match_data.get("boxscore", {}).get("form", [])
+            if events:
+                event = events[0]
+                
+                home_team_id = event.get("events", [{}])[0].get("homeTeamId", "")
+                away_team_id = event.get("events", [{}])[0].get("awayTeamId", "")
+                
+                return home_team_id, away_team_id
+            else:
+                print("Error: No event data available.")
+                return '', ''
+        else:
+            print(f"Failed to fetch match details. Status code: {response.status_code}")
+            return '', ''
+    except requests.exceptions.RequestException as e:
+        print(f"Error during the request: {e}")
+        return '', ''
 		
 def getLineUps(matchID):
-	try:
-		# try to find line-ups
-		lineAddress = "http://www.espn.com/soccer/lineups?gameId=" + matchID
-		lineWebsite = requests.get(lineAddress, timeout=15)
-		line_html = lineWebsite.text
-		split = line_html.split('<div class="sub-module soccer">') # [0]:nonsense [1]:team1 [2]:team2
-		
-		if len(split) > 1:
-			team1StartBlock = split[1].split('Substitutes')[0]
-			if len(split[1].split('Substitutes')) > 1:
-				team1SubBlock = split[1].split('Substitutes')[1]
-			else:
-				team1SubBlock = ''
-			team2StartBlock = split[2].split('Substitutes')[0]
-			if len(split[2].split('Substitutes')) > 1:
-				team2SubBlock = split[2].split('Substitutes')[1]
-			else:
-				team2SubBlock = ''
-			
-			team1Start = []
-			team2Start = []	
-			team1Sub = []
-			team2Sub = []
-			
-			t1StartInfo = re.findall('"accordion-item" data-id="(.*?)</div>', team1StartBlock, re.DOTALL)
-			t1SubInfo = re.findall('"accordion-item" data-id="(.*?)</div>', team1SubBlock, re.DOTALL)
-			t2StartInfo = re.findall('"accordion-item" data-id="(.*?)</div>', team2StartBlock, re.DOTALL)
-			t2SubInfo = re.findall('"accordion-item" data-id="(.*?)</div>', team2SubBlock, re.DOTALL)
+    url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
 
-			for playerInfo in t1StartInfo:
-				playerInfo = playerInfo.replace('\t','').replace('\n','')
-				playerNum = playerInfo[0:6]
-				if '%' not in playerNum:
-					playertext = ''
-					if 'icon-soccer-substitution-before' in playerInfo:
-						playertext += '!sub '
-					playertext += re.findall('<span class="name">.*?data-player-uid=.*?>(.*?)<', playerInfo, re.DOTALL)[0]
-					team1Start.append(playertext)
-			for playerInfo in t1SubInfo:
-				playerInfo = playerInfo.replace('\t','').replace('\n','')
-				playerNum = playerInfo[0:6]
-				if '%' not in playerNum:
-					playertext = ''
-					playertext += re.findall('<span class="name">.*?data-player-uid=.*?>(.*?)<', playerInfo, re.DOTALL)[0]
-					team1Sub.append(playertext)
-			for playerInfo in t2StartInfo:
-				playerInfo = playerInfo.replace('\t','').replace('\n','')
-				playerNum = playerInfo[0:6]
-				if '%' not in playerNum:
-					playertext = ''
-					if 'icon-soccer-substitution-before' in playerInfo:
-						playertext += '!sub '
-					playertext += re.findall('<span class="name">.*?data-player-uid=.*?>(.*?)<', playerInfo, re.DOTALL)[0]
-					team2Start.append(playertext)				
-			for playerInfo in t2SubInfo:
-				playerInfo = playerInfo.replace('\t','').replace('\n','')
-				playerNum = playerInfo[0:6]
-				if '%' not in playerNum:
-					playertext = ''
-					playertext += re.findall('<span class="name">.*?data-player-uid=.*?>(.*?)<', playerInfo, re.DOTALL)[0]
-					team2Sub.append(playertext)
-			
-			# if no players found:
-			if team1Start == []:
-				team1Start = ["*Not available*"]
-			if team1Sub == []:
-				team1Sub = ["*Not available*"]
-			if team2Start == []:
-				team2Start = ["*Not available*"]
-			if team2Sub == []:
-				team2Sub = ["*Not available*"]
-			return team1Start,team1Sub,team2Start,team2Sub
-		
-		else:
-			team1Start = ["*Not available*"]
-			team1Sub = ["*Not available*"]
-			team2Start = ["*Not available*"]
-			team2Sub = ["*Not available*"]
-			return team1Start,team1Sub,team2Start,team2Sub
-	except IndexError:
-		logger.warning("[INDEX ERROR:]")
-		team1Start = ["*Not available*"]
-		team1Sub = ["*Not available*"]
-		team2Start = ["*Not available*"]
-		team2Sub = ["*Not available*"]
-		return team1Start,team1Sub,team2Start,team2Sub
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            rosters = data.get("rosters", [])
+            if len(rosters) < 2:
+                print("No rosters data available.")
+                return None
+
+            home_roster = rosters[0].get("roster", [])
+            away_roster = rosters[1].get("roster", [])
+
+            team1start = []
+            team1sub = []
+            team2start = []
+            team2sub = []
+
+            for player in home_roster:
+                player_name = player.get("athlete", {}).get("displayName", "Unknown Player")
+                if player.get("starter", False):
+                    team1start.append(player_name)
+                else:
+                    team1sub.append(player_name)
+
+            for player in away_roster:
+                player_name = player.get("athlete", {}).get("displayName", "Unknown Player")
+                if player.get("starter", False):
+                    team2start.append(player_name)
+                else:
+                    team2sub.append(player_name)
+
+            return team1start, team1sub, team2start, team2sub
+
+        else:
+            print(f"Failed to fetch match details. Status code: {response.status_code}")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error during the request: {e}")
+        return None
 		
 def getTeamAbbrevs(matchID):
-	lineAddress = "http://www.espn.com/soccer/match?gameId=" + matchID
-	lineWebsite = requests.get(lineAddress, timeout=15)
-	line_html = lineWebsite.text
-	
-	t1abb = re.findall('<span class="long-name">(.*?)<', line_html, re.DOTALL)[0][0:3].upper()
-	t2abb = re.findall('<span class="long-name">(.*?)<', line_html, re.DOTALL)[1][0:3].upper()
-	
-	teamabbs = re.findall('<span class="abbrev">(.*?)<', line_html, re.DOTALL)
-	if len(teamabbs) >= 2:
-		t1abb = teamabbs[0][0:3]
-		t2abb = teamabbs[1][0:3]
-	return t1abb,t2abb
+    url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
 
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            match_data = response.json()
+            
+            form_data = match_data.get("boxscore", {}).get("form", [])
+            if len(form_data) >= 2:
+                home_team_abbr = form_data[0].get("team", {}).get("abbreviation", "")
+                away_team_abbr = form_data[1].get("team", {}).get("abbreviation", "")
+                
+                return home_team_abbr, away_team_abbr
+            else:
+                print("Error: Insufficient form data available.")
+                return '', ''
+        else:
+            print(f"Failed to fetch match details. Status code: {response.status_code}")
+            return '', ''
+    except requests.exceptions.RequestException as e:
+        print(f"Error during the request: {e}")
+        return '', ''
+	
+def getTeamNames(matchID):
+    url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            match_data = response.json()
+            
+            form_data = match_data.get("boxscore", {}).get("form", [])
+            if len(form_data) >= 2:
+                home_team_name = form_data[0].get("team", {}).get("displayName", "")
+                away_team_name = form_data[1].get("team", {}).get("displayName", "")
+                
+                return home_team_name, away_team_name
+            else:
+                print("Error: Insufficient form data available.")
+                return '', ''
+        else:
+            print(f"Failed to fetch match details. Status code: {response.status_code}")
+            return '', ''
+    except requests.exceptions.RequestException as e:
+        print(f"Error during the request: {e}")
+        return '', ''
+	
+def getMatchSummary(matchID):
+    url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+
+
+        if response.status_code == 200:
+            match_data = response.json()
+
+            venue = match_data.get("gameInfo", {}).get("venue", {}).get("fullName", "")
+
+            header = match_data.get("header", {})
+            if header:
+                comp = header.get("season", {}).get("name", "")
+
+                match_datetime = header.get("competitions", [{}])[0].get("date", "")
+                if match_datetime:
+                    match_time = datetime.datetime.strptime(match_datetime, "%Y-%m-%dT%H:%MZ")
+                    ko_day = match_time.day
+                    ko_time = match_time.strftime("%H:%M")
+                else:
+                    ko_day, ko_time = "", ""
+                
+                status = match_data.get("header", {}).get("competitions", {})[0].get("status", {}).get("type", "").get("detail", "")
+
+            return venue, ko_day, ko_time, status, comp
+
+        else:
+            print(f"Failed to fetch match details. Status code: {response.status_code}")
+            return "", "", "", "", ""
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error during the request: {e}")
+        return "", "", "", "", ""
+	
 # get venue, ref, lineups, etc from ESPN	
 def getMatchInfo(matchID):
-	lineAddress = "http://www.espn.com/soccer/match?gameId=" + matchID
-	print(getTimestamp() + "Finding ESPN info from " + lineAddress + "...", end='')
-	lineWebsite = requests.get(lineAddress, timeout=15)
-	line_html = lineWebsite.text
+    url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
 
-	# get "fixed" versions of team names (ie team names from ESPNFC, not team names from match thread request)
-	team1fix = re.findall('<span class="long-name">(.*?)<', line_html, re.DOTALL)[0]
-	team2fix = re.findall('<span class="long-name">(.*?)<', line_html, re.DOTALL)[1]
-	t1id,t2id = getTeamIDs(matchID)
-	t1abb,t2abb = getTeamAbbrevs(matchID)
-	
-	if team1fix[-1]==' ':
-		team1fix = team1fix[0:-1]
-	if team2fix[-1]==' ':
-		team2fix = team2fix[0:-1]	
-	
-	status = getStatus(matchID)
-	ko_date = re.findall('<span data-date="(.*?)T', line_html, re.DOTALL)
-	if ko_date != []:
-		ko_date = ko_date[0]
-		ko_day = ko_date[8:]
-		ko_time = re.findall('<span data-date=".*?T(.*?)Z', line_html, re.DOTALL)[0]
-		# above time is actually "DSTtimedelta" hours from now (ESPN time in source code)
-	else:
-		ko_day = ''
-		ko_time = ''
-	
-	venue = re.findall('<div>VENUE: (.*?)<', line_html, re.DOTALL)
-	if venue != []:
-		venue = venue[0]
-	else:
-		venue = '?'
-		
-	compfull = re.findall('<div class="game-details header">(.*?)<', line_html, re.DOTALL)
-	if compfull != []:
-		comp = re.sub('20.*? ','',compfull[0]).strip(' \n\t\r')
-		if comp.find(',') != -1:
-			comp = comp[0:comp.index(',')]
-	else:
-		comp = ''
-		
-	team1Start,team1Sub,team2Start,team2Sub = getLineUps(matchID)
-	print("complete.")
-	return (team1fix,t1id,team2fix,t2id,team1Start,team1Sub,team2Start,team2Sub,venue,ko_day,ko_time,status,comp,t1abb,t2abb)
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            match_data = response.json()
+
+            team1Start, team1Sub, team2Start, team2Sub = getLineUps(matchID)
+            
+            team1fix, team2fix = getTeamNames(matchID)
+            t1id, t2id = getTeamIDs(matchID)
+            venue, ko_day, ko_time, status, comp = getMatchSummary(matchID)
+            t1abb, t2abb = getTeamAbbrevs(matchID)  # Assuming getTeamAbbrevs is defined
+
+            print("complete.")
+            return (team1fix, t1id, team2fix, t2id, team1Start, team1Sub, team2Start, team2Sub, venue, ko_day, ko_time, status, comp, t1abb, t2abb)
+        else:
+            print(f"Failed to fetch match data: {response.status_code}")
+            return None  
+
+    except Exception as e:
+        print(f"Error fetching match data: {e}")
+        return None  
+
 	
 def getSprite(teamID,sub):
 	try:
@@ -470,61 +493,58 @@ def writeLineUps(sub,body,t1,t1id,t2,t2id,team1Start,team1Sub,team2Start,team2Su
 	body += ", ".join(x for x in team2Sub) + "."
 	
 	return body
-	
-#def customLineUps(matchID,t1lineups,t2lineups):
-	
 
-def grabEvents(matchID,sub):
-	markup = loadMarkup(sub)
-	lineAddress = "http://www.espn.com/soccer/commentary?gameId=" + matchID
-#	print getTimestamp() + "Grabbing events from " + lineAddress + "...",
-	lineWebsite = requests.get(lineAddress, timeout=15)
-	line_html = lineWebsite.text
-	try:
-		if lineWebsite.status_code == 200:
-			body = ""
-			split_all = line_html.split('<h1>Match Commentary</h1>') # [0]:stuff [1]:commentary + key events
-			split = split_all[1].split('<h1>Key Events</h1>') # [0]:commentary [1]: key events
-		
-			events = re.findall('<tr data-id=(.*?)</tr>',split[1],re.DOTALL)
-			events = events[::-1]
-			
-			# will only report goals (+ penalties, own goals), yellows, reds, subs
-			supportedEvents = ['goal','goal---header','goal---free-kick','penalty---scored','own-goal','penalty---missed','penalty---saved','yellow-card','red-card','substitution']
-			for text in events:
-				tag = re.findall('data-type="(.*?)"',text,re.DOTALL)[0]
-				if tag.lower() in supportedEvents:
-					time = re.findall('"time-stamp">(.*?)<',text,re.DOTALL)[0]
-					time = time.strip()
-					info = "**" + time + "** "
-					event = re.findall('"game-details">(.*?)</td',text,re.DOTALL)[0].strip()
-					if tag.lower().startswith('goal') or tag.lower() == 'penalty---scored' or tag.lower() == 'own-goal':
-						if tag.lower().startswith('goal'):
-							info += markup[goal] + ' **' + event + '**'
-						elif tag.lower() == 'penalty---scored':
-							info += markup[pgoal] + ' **' + event + '**'
-						else:
-							info += markup[ogoal] + ' **' + event + '**'
-					if tag.lower() == 'penalty---missed' or tag.lower() == 'penalty---saved':
-						info += markup[mpen] + ' **' + event + '**'
-					if tag.lower() == 'yellow-card':
-						info += markup[yel] + ' ' + event
-					if tag.lower() == 'red-card':
-						info += markup[red] + ' ' + event
-					if tag.lower() == 'substitution':
-						info += markup[subst] + ' ' + re.sub('<.*?>','',event)
-					body += info + '\n\n'
-		
-	#		print "complete."
-			return body
-			
-		else:
-	#		print "failed."
-			return ""
-	except:
-#		print "edit failed"
-		logger.exception('[EDIT ERROR:]')
-		return ""
+	
+def grabEvents(matchID, subreddit):
+    markup = loadMarkup(subreddit)
+    url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            match_data = response.json()
+            commentary = ""
+
+            for event in match_data.get('commentary', []):
+                event_type = event.get('play', {}).get('type', {}).get('text', '').lower()
+
+                important_event_types = [
+                    "goal", "penalty scored", "own goal", "yellow card", "red card", "substitution"
+                ]
+
+                if event_type in important_event_types:
+                    time = event.get('time', {}).get('displayValue', '')
+                    description = event.get('text', '')
+
+                    info = f"**{time}** "
+
+                    if event_type == "goal":
+                        info += markup[0] + ' **' + description + '**'
+                    elif event_type == "penalty scored":
+                        info += markup[1] + ' **' + description + '**'
+                    elif event_type == "own goal":
+                        info += markup[2] + ' **' + description + '**'
+                    elif event_type == "yellow card":
+                        info += markup[4] + ' ' + description
+                    elif event_type == "red card":
+                        info += markup[6] + ' ' + description
+                    elif event_type == "substitution":
+                        info += markup[7] + ' ' + description
+
+                    commentary += info + '\n\n'
+
+            print("Complete.")
+            return commentary
+        else:
+            print("Failed to fetch commentary.")
+            return ""
+
+    except Exception as e:
+        print("Error fetching events:")
+        return ""
 
 def getTimes(ko):
 	hour = ko[0:ko.index(':')]
@@ -541,9 +561,11 @@ def submitThread(sub,title):
 	try:
 		if sub in needsflairlist:
 			thread = r.subreddit(sub).submit(title,selftext='**Venue:**\n\n**LINE-UPS**',send_replies=False,flair_id=list(r.subreddit(sub).flair.link_templates)[needsflairlist[sub]]['id'])
+			thread.validate_on_submit = True
 		else:
 			thread = r.subreddit(sub).submit(title,selftext='**Venue:**\n\n**LINE-UPS**',send_replies=False)
 		print("complete.")
+		print(getTimestamp() + thread.shortlink)
 		return True,thread
 	except:
 		print("failed.")
@@ -604,6 +626,7 @@ def createNewThread(team1,team2,reqr,sub,direct,type):
 		if sub.lower() not in timewhitelist or sub.lower() in timewhitelist and reqr.lower() not in timewhitelist[sub.lower()]:
 			hour_i, min_i, now = getTimes(ko_time)
 			now_f = now + datetime.timedelta(hours = DSTtimedelta, minutes = timelimit)
+			print(now_f.day)
 			if ko_day == '':
 				return 1,''
 			if now_f.day < int(ko_day):
@@ -685,25 +708,32 @@ def createNewThread(team1,team2,reqr,sub,direct,type):
 		return 1,''
 
 # if the requester just wants a template		
-def createMatchInfo(team1,team2):
-	matchID = findMatchSite(team1,team2)
-	if matchID != 'no match':
-		t1, t1id, t2, t2id, team1Start, team1Sub, team2Start, team2Sub, venue, ko_day, ko_time, status, comp, t1abb, t2abb = getMatchInfo(matchID)
-		
-		markup = loadMarkup('soccer')
+def createMatchInfo(team1, team2):
+    matchID = findMatchSite(team1, team2)
+    if matchID != 'no match':
+        t1, t1id, t2, t2id, team1Start, team1Sub, team2Start, team2Sub, venue, ko_day, ko_time, status, comp, t1abb, t2abb = getMatchInfo(matchID)
+        
+        markup = loadMarkup('soccer')
+        score = getScore(matchID)
 
-		body = '#**' + status + ": " + t1 + ' vs ' + t2 + '**\n\n'
-		body += '**Venue:** ' + venue + '\n\n--------\n\n'
-		body += markup[lines] + ' ' 
-		body = writeLineUps('soccer',body,t1,t1id,t2,t2id,team1Start,team1Sub,team2Start,team2Sub)
-		
-		body += '\n\n------------\n\n' + markup[evnts] + ' **MATCH EVENTS**\n\n'
-		
-		logger.info("Provided info for %s vs %s", t1, t2)
-		print(getTimestamp() + "Provided info for " + t1 + " vs " + t2)
-		return 0,body
-	else:
-		return 1,''
+        # Use "vs" if the match hasn't started yet
+        scoreStr = "vs" if " at " in status else score
+
+        body = f'#**{status}: {t1} {scoreStr} {t2}**\n\n'
+        body += f'**Venue:** {venue}\n\n--------\n\n'
+        body += markup[lines] + ' '
+        body = writeLineUps('soccer', body, t1, t1id, t2, t2id, team1Start, team1Sub, team2Start, team2Sub)
+        
+        events = grabEvents(matchID, "mane-test")
+        body += '\n\n------------\n\n' + markup[evnts] + ' **MATCH EVENTS**\n\n' + events
+        
+        logger.info("Provided info for %s vs %s", t1, t2)
+        print(getTimestamp() + "Provided info for " + t1 + " vs " + t2)
+        return 0, body
+    else:
+        return 1, ''
+
+
 
 # delete a thread (on admin request)
 def deleteThread(id):
@@ -760,9 +790,27 @@ def firstTryTeams(msg):
 		t2s += word + ' '
 	return [t1s,t2s]
 
+def getScore(matchID):
+    try:
+        url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        match_data = response.json()
+
+        boxscore = match_data.get("header", {}).get("competitions", [])[0]
+        home_score = boxscore["competitors"][0]["score"]
+        away_score = boxscore["competitors"][1]["score"]
+        score = f"{home_score}-{away_score}"
+        return score
+    except Exception as e:
+        print(e)
+        return None
+
 # check for new mail, create new threads if needed
 def checkAndCreate():
-	detour = True
+	detour = False
 	replytext = "Update from /u/spawnofyanni, June 15:\n\nHi there. I'm currently redirecting all DMs sent to /u/matchthreadder to this automated message. ESPN seems to have gone through a major backend redesign, which means that all of the code that runs this bot was just made obsolete. I'm going to spend a little time figuring out how bad this problem is, and will post an update on what this means as soon as I can. In the mean time, I'd recommend making a thread manually."
 	if len(activeThreads) > 0:		
 		print(getTimestamp() + "Checking messages...")
@@ -771,7 +819,7 @@ def checkAndCreate():
 	subdel = ' for '
 	for msg in r.inbox.unread(limit=None):
 		msg.mark_read()
-		#if isinstance(msg, Message):
+		print(msg)
 		#	unread_messages.append(msg)
 		sub = subreddit
 		if msg.subject.lower() == 'mtdirect':
@@ -816,6 +864,7 @@ def checkAndCreate():
 					sub = subreq[1].split('/')[-1]
 					sub = sub.lower()
 					sub = sub.strip()
+					print(sub)
 				if subreq[0].strip().isdigit():
 					threadStatus,thread_id = createNewThread('','',msg.author.name,sub,subreq[0].strip(),type)
 				else:
@@ -849,7 +898,7 @@ def checkAndCreate():
 						replytext = "Sorry, the bot is currently unable to post threads. Check with /u/" + admin + " for more info; this should hopefully be resolved soon."
 					msg.reply(body=replytext)		
 					
-		if msg.subject.lower() == 'match info':
+		if msg.subject.lower() in ['match info', 'match information']:
 			if detour:
 				#replytext = '/u/MatchThreadder is down for maintenance (starting Dec 5). The bot should be back up in a few days. Keep an eye out for when it starts posting threads again - message /u/spawnofyanni if you have any questions!\n\n--------------\n\n[Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you want to know how to make your own match thread.'
 				msg.reply(body=replytext)
@@ -861,11 +910,13 @@ def checkAndCreate():
 					if attempt[0] != msg.body:
 						teams = attempt
 				threadStatus,text = createMatchInfo(teams[0],teams[1])
+				print(getTimestamp() + f"Grabbing Match info for {teams[0]} vs {teams[1]}")
 				if threadStatus == 0: # successfully found info
 					replytext = "Below is the information for the match you've requested.\n\nIf you're using [RES](http://redditenhancementsuite.com/), you can use the 'source' button below this message to copy/paste the exact formatting code. If you aren't, you'll have to add the formatting yourself.\n\n----------\n\n" + text
 				if threadStatus == 1: # not found
 					replytext = "Sorry, I couldn't find info for that match. In the future I'll account for more matches around the world."
 				msg.reply(body=replytext)
+				print(getTimestamp() + replytext if threadStatus != 0 else "Match Info Sent")
 		
 		if msg.subject.lower() == 'delete':
 			if msg.author.name == admin:
@@ -894,86 +945,92 @@ def checkAndCreate():
 	#r.inbox.mark_read(unread_messages)
 				
 def getExtraInfo(matchID):
-	try:
-		lineAddress = "http://www.espn.com/soccer/match?gameId=" + matchID
-		lineWebsite = requests.get(lineAddress, timeout=15)
-		line_html = lineWebsite.text
-		info = re.findall('data-stat="note">(.*?)<',line_html,re.DOTALL)
-		if info == []:
-			return ''
-		else:
-			return info[0]
-	except requests.exceptions.Timeout:
-		return ''
+    try:
+        url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        }
+
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 200:
+            match_data = response.json()
+
+            notes = match_data.get("header", {}).get("competitions", [{}])[0].get("notes", [])
+
+            if notes:
+                return notes[0]  
+            else:
+                return ''  
+        else:
+            print(f"Failed to fetch match details. Status code: {response.status_code}")
+            return ''
+    except requests.exceptions.RequestException as e:
+        print(f"Error during the request: {e}")
+        return ''
 				
 # update score, scorers
 def updateScore(matchID, t1, t2, sub):
-	try:
-		lineAddress = "http://www.espn.com/soccer/match?gameId=" + matchID
-		lineWebsite = requests.get(lineAddress, timeout=15)
-		line_html = lineWebsite.text
-		leftScore = re.findall('data-stat="score">(.*?)<',line_html,re.DOTALL)[0].strip()
-		rightScore = re.findall('data-stat="score">(.*?)<',line_html,re.DOTALL)[1].strip()
-		info = getExtraInfo(matchID)
-		status = getStatus(matchID)
-		ESPNUpdating = True
-		if status == 'v':
-			status = "0'"
-			ESPNUpdating = False
-		
-		leftInfo = re.findall('<div class="team-info players"(.*?)</div>',line_html,re.DOTALL)[0]
-		rightInfo = re.findall('<div class="team-info players"(.*?)</div>',line_html,re.DOTALL)[1]
-		
-		leftGoals = re.findall('data-event-type="goal"(.*?)</ul>',leftInfo,re.DOTALL)
-		rightGoals = re.findall('data-event-type="goal"(.*?)</ul>',rightInfo,re.DOTALL)
-		
-		if leftGoals != []:
-			leftScorers = re.findall('<li>(.*?)</li',leftGoals[0],re.DOTALL)
-		else:
-			leftScorers = []
-		if rightGoals != []:
-			rightScorers = re.findall('<li>(.*?)</li',rightGoals[0],re.DOTALL)
-		else:
-			rightScorers = []
-		
-		t1id,t2id = getTeamIDs(matchID)
-		if sub.lower() in spriteSubs:
-			t1sprite = ''
-			t2sprite = ''
-			if getSprite(t1id,sub) != '' and getSprite(t2id,sub) != '':
-				t1sprite = getSprite(t1id,sub)
-				t2sprite = getSprite(t2id,sub)
-			text = '#**' + status + ': ' + t1 + ' ' + t1sprite + ' [' + leftScore + '-' + rightScore + '](#bar-3-white) ' + t2sprite + ' ' + t2 + '**\n\n'
-		else:
-			text = '#**' + status + ": " +  t1 + ' ' + leftScore + '-' + rightScore + ' ' + t2 + '**\n\n'
-		if not ESPNUpdating:
-			text += '*If the match has started, ESPN might not be providing updates for this game.*\n\n'
-		
-		if info != '':
-			text += '***' + info + '***\n\n'
-		
-		left = ''
-		if leftScorers != []:
-			left += "*" + t1 + " scorers: "
-			for scorer in leftScorers:
-				
-				scorer = scorer[0:scorer.index('<')].strip(' \t\n\r') + ' ' + scorer[scorer.index('('):scorer.index('/')-1].strip(' \t\n\r')
-				left += scorer + ", "
-			left = left[0:-2] + "*"
-			
-		right = ''
-		if rightScorers != []:
-			right += "*" + t2 + " scorers: "
-			for scorer in rightScorers:
-				scorer = scorer[0:scorer.index('<')].strip(' \t\n\r') + ' ' + scorer[scorer.index('('):scorer.index('/')-1].strip(' \t\n\r')
-				right += scorer + ", "
-			right = right[0:-2] + "*"
-			
-		text += left + '\n\n' + right
-			
-		return text
-	except requests.exceptions.Timeout:
-		return '#**--**\n\n'
+    try:
+        url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        match_data = response.json()  
+
+        boxscore = match_data.get("header", {}).get("competitions", [])[0]
+        home_score = boxscore["competitors"][0]["score"]
+        away_score = boxscore["competitors"][1]["score"] 
+        score = f"{home_score}-{away_score}"
+
+        t1_scorers = []
+        t2_scorers = []
+
+        events = match_data.get("commentary", [])
+        for event in events:
+            event_type = event.get("play", {}).get("type", {}).get("text", "")
+            if event_type in ["Goal", "Penalty Scored", "Own Goal"]:
+                goal_time = event.get("time", {}).get("displayValue", "")
+                participants = event.get("play", {}).get("participants", [])
+                if participants:
+                    goal_player = participants[0].get("athlete", {}).get("displayName", "")
+                else:
+                    goal_player = "Unknown"
+
+                goal_team = event.get("play", {}).get("team", {}).get("displayName", "")
+
+                if event_type == "Goal":
+                    if goal_team == t1:
+                        t1_scorers.append(f"{goal_player} ({goal_time})")
+                    elif goal_team == t2:
+                        t2_scorers.append(f"{goal_player} ({goal_time})")
+                elif event_type == "Penalty Scored":
+                    if goal_team == t1:
+                        t1_scorers.append(f"{goal_player} ({goal_time} PEN)")
+                    elif goal_team == t2:
+                        t2_scorers.append(f"{goal_player} ({goal_time} PEN)")
+                elif event_type == "Own Goal":
+                    if goal_team == t1: 
+                        t2_scorers.append(f"{goal_player} ({goal_time} OG)")  
+                    elif goal_team == t2: 
+                        t1_scorers.append(f"{goal_player} ({goal_time} OG)")
+
+        status = getStatus(matchID)
+        match_text = f"{status} #**{t1} {score} {t2}**\n\n"
+        
+        if t1_scorers:
+            match_text += f"{t1} scorers: " + ", ".join(t1_scorers) + "\n"
+        
+        if t2_scorers:
+            match_text += f"{t2} scorers: " + ", ".join(t2_scorers) + "\n"
+        
+        return match_text
+    
+    except requests.exceptions.Timeout:
+        return "#**--**\n\n"
+    except Exception as e:
+        return print(e)
 		
 def createPMT(sub, title, body):
 	print(getTimestamp() + "Submitting PMT for " + title + "...", end='')
