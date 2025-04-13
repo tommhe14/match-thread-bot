@@ -144,7 +144,7 @@ def loadMarkup(subreddit):
 	try:
 		markup = [line.rstrip('\n') for line in open(subreddit + '.txt')]
 	except:
-		markup = [line.rstrip('\n') for line in open('soccer.txt')]
+		markup = [line.rstrip('\n') for line in open('mane_test.txt')]
 	return markup
 	
 def getBotStatus():
@@ -160,7 +160,7 @@ def getStatus(matchID):
     if status:  
         return status
     else:
-        return 'v' 
+        return 'NS' 
 	
 def remove_accents(input_str):
     nfkd_form = unicodedata.normalize('NFKD', input_str)
@@ -182,7 +182,9 @@ def guessRightMatch(possibles):
 	return guess
 
 def fetch_espn_scoreboard():
-    url = "https://site.web.api.espn.com/apis/v2/scoreboard/header?region=gb&lang=en&contentorigin=espn&buyWindow=1m&showAirings=buy,live,replay&showZipLookup=true&tz=Europe/London&_ceID=15878776"
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/all/scoreboard?dates={today}"
+
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
     }
@@ -207,24 +209,20 @@ def findMatchSite(team1, team2):
         if not data:
             return 'no match'
 
-        # Normalize the input team names to lowercase
         t1 = team1.lower()
         t2 = team2.lower()
 
         linkList = []
-        for sport in data.get("sports", []):
-            for league in sport.get("leagues", []):
-                for event in league.get("events", []):
-                    home_team = event["competitors"][0]["displayName"].lower()
-                    away_team = event["competitors"][1]["displayName"].lower()
-                    match_id = event["id"]
+        for event in data.get("events", []):
+            teams = event.get("competitions")[0].get("competitors")
+            home_team = teams[0]["team"]["displayName"].lower()
+            away_team = teams[1]["team"]["displayName"].lower()
+            match_id = event["id"]
 
-                    # Check if the provided team1 name exists in home or away teams
-                    if (t1.lower().strip() in home_team.lower() or t1.lower().strip() in away_team.lower()) and (t2.lower().strip() in home_team.lower() or t2.lower().strip() in away_team.lower()):
-                        linkList.append(match_id)
-                        print(f"Match found and appended: {home_team} vs {away_team} (ID: {match_id})")
+            if (t1.lower().strip() in home_team.lower() or t1.lower().strip() in away_team.lower()) and (t2.lower().strip() in home_team.lower() or t2.lower().strip() in away_team.lower()):
+                linkList.append(match_id)
+                print(f"Match found and appended: {home_team} vs {away_team} (ID: {match_id})")
 
-        # If matches are found, get the most common match ID
         if linkList:
             counts = Counter(linkList)
             most_common_match_id = counts.most_common(1)[0][0]
@@ -383,7 +381,6 @@ def getMatchSummary(matchID):
     try:
         response = requests.get(url, headers=headers)
 
-
         if response.status_code == 200:
             match_data = response.json()
 
@@ -436,11 +433,11 @@ def getMatchInfo(matchID):
             return (team1fix, t1id, team2fix, t2id, team1Start, team1Sub, team2Start, team2Sub, venue, ko_day, ko_time, status, comp, t1abb, t2abb)
         else:
             print(f"Failed to fetch match data: {response.status_code}")
-            return None  
+            return None  # Or an empty tuple: return () to avoid unpacking issues
 
     except Exception as e:
         print(f"Error fetching match data: {e}")
-        return None  
+        return None  # Or an empty tuple
 
 	
 def getSprite(teamID,sub):
@@ -706,33 +703,89 @@ def createNewThread(team1,team2,reqr,sub,direct,type):
 		print(getTimestamp() + "Could not find match info for " + team1 + " vs " + team2)
 		logger.info("Could not find match info for %s vs %s", team1, team2)
 		return 1,''
+	
+def GetScorers(matchID, t1, t2):
+    try:
+        url = f"https://site.web.api.espn.com/apis/site/v2/sports/soccer/all/summary?region=gb&lang=en&contentorigin=espn&event={matchID}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=15)
+        match_data = response.json()
 
-# if the requester just wants a template		
+        t1_scorers = []
+        t2_scorers = []
+
+        events = match_data.get("commentary", [])
+        for event in events:
+            event_type = event.get("play", {}).get("type", {}).get("text", "")
+            if event_type in ["Goal", "Penalty Scored", "Own Goal"]:
+                goal_time = event.get("time", {}).get("displayValue", "")
+                participants = event.get("play", {}).get("participants", [])
+                if participants:
+                    goal_player = participants[0].get("athlete", {}).get("displayName", "")
+                else:
+                    goal_player = "Unknown"
+
+                goal_team = event.get("play", {}).get("team", {}).get("displayName", "")
+
+                if event_type == "Goal":
+                    if goal_team == t1:
+                        t1_scorers.append(f"{goal_player} ({goal_time})")
+                    elif goal_team == t2:
+                        t2_scorers.append(f"{goal_player} ({goal_time})")
+                elif event_type == "Penalty Scored":
+                    if goal_team == t1:
+                        t1_scorers.append(f"{goal_player} ({goal_time} PEN)")
+                    elif goal_team == t2:
+                        t2_scorers.append(f"{goal_player} ({goal_time} PEN)")
+                elif event_type == "Own Goal":
+                    if goal_team == t1:
+                        t2_scorers.append(f"{goal_player} ({goal_time} OG)")
+                    elif goal_team == t2:
+                        t1_scorers.append(f"{goal_player} ({goal_time} OG)")
+
+        match_text = ""
+
+        if t1_scorers:
+            match_text += f"{t1} scorers: " + ", ".join(t1_scorers) + "\n"
+
+        if t2_scorers:
+            match_text += f"{t2} scorers: " + ", ".join(t2_scorers) + "\n"
+
+        return match_text
+
+    except requests.exceptions.Timeout:
+        return "#**--**\n\n"
+    except Exception as e:
+        return print(e)
+
+
 def createMatchInfo(team1, team2):
     matchID = findMatchSite(team1, team2)
     if matchID != 'no match':
         t1, t1id, t2, t2id, team1Start, team1Sub, team2Start, team2Sub, venue, ko_day, ko_time, status, comp, t1abb, t2abb = getMatchInfo(matchID)
-        
-        markup = loadMarkup('soccer')
-        score = getScore(matchID)
 
-        # Use "vs" if the match hasn't started yet
+        markup = loadMarkup('mane_test')
+        score = getScore(matchID)
+        scorers = GetScorers(matchID, t1, t2)
+
         scoreStr = "vs" if " at " in status else score
 
-        body = f'#**{status}: {t1} {scoreStr} {t2}**\n\n'
+        body = f'#**{status}: {t1} {scoreStr} {t2}**\n\n' + scorers
         body += f'**Venue:** {venue}\n\n--------\n\n'
-        body += markup[lines] + ' '
-        body = writeLineUps('soccer', body, t1, t1id, t2, t2id, team1Start, team1Sub, team2Start, team2Sub)
-        
-        events = grabEvents(matchID, 'soccer')
-        body += '\n\n------------\n\n' + markup[evnts] + ' **MATCH EVENTS**\n\n' + events
-        
+        body += markup['lines'] + ' '
+
+        body = writeLineUps('mane_test', body, t1, t1id, t2, t2id, team1Start, team1Sub, team2Start, team2Sub)
+
+        events = grabEvents(matchID, "mane_test")
+        body += '\n\n------------\n\n' + markup['evnts'] + ' **MATCH EVENTS**\n\n' + events
+
         logger.info("Provided info for %s vs %s", t1, t2)
         print(getTimestamp() + "Provided info for " + t1 + " vs " + t2)
         return 0, body
     else:
         return 1, ''
-
 
 
 # delete a thread (on admin request)
@@ -977,11 +1030,12 @@ def updateScore(matchID, t1, t2, sub):
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
         }
         response = requests.get(url, headers=headers, timeout=15)
-        match_data = response.json()  
+        match_data = response.json()
 
         boxscore = match_data.get("header", {}).get("competitions", [])[0]
-        home_score = boxscore["competitors"][0]["score"]
-        away_score = boxscore["competitors"][1]["score"] 
+
+        home_score = boxscore["competitors"][0].get("score", "?")
+        away_score = boxscore["competitors"][1].get("score", "?")
         score = f"{home_score}-{away_score}"
 
         t1_scorers = []
@@ -1011,22 +1065,22 @@ def updateScore(matchID, t1, t2, sub):
                     elif goal_team == t2:
                         t2_scorers.append(f"{goal_player} ({goal_time} PEN)")
                 elif event_type == "Own Goal":
-                    if goal_team == t1: 
-                        t2_scorers.append(f"{goal_player} ({goal_time} OG)")  
-                    elif goal_team == t2: 
+                    if goal_team == t1:
+                        t2_scorers.append(f"{goal_player} ({goal_time} OG)")
+                    elif goal_team == t2:
                         t1_scorers.append(f"{goal_player} ({goal_time} OG)")
 
         status = getStatus(matchID)
         match_text = f"{status} #**{t1} {score} {t2}**\n\n"
-        
+
         if t1_scorers:
             match_text += f"{t1} scorers: " + ", ".join(t1_scorers) + "\n"
-        
+
         if t2_scorers:
             match_text += f"{t2} scorers: " + ", ".join(t2_scorers) + "\n"
-        
+
         return match_text
-    
+
     except requests.exceptions.Timeout:
         return "#**--**\n\n"
     except Exception as e:
