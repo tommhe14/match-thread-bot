@@ -6,6 +6,8 @@ from praw.models import Message
 from collections import Counter
 from itertools import groupby
 from time import sleep
+import time
+from pathlib import Path
 
 # TO DO: 
 # cookielib to http.cookiejar
@@ -860,142 +862,183 @@ def getScore(matchID):
     except Exception as e:
         print(e)
         return None
+    
+PROCESSED_FILE = "processed_messages.json"
 
-# check for new mail, create new threads if needed
+def load_processed_data():
+    """Load processed message data from file with error handling."""
+    try:
+        if not Path(PROCESSED_FILE).exists():
+            return {"processed_messages": {}, "user_last_request": {}}
+        with open(PROCESSED_FILE, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Error loading processed data: {e}")
+        return {"processed_messages": {}, "user_last_request": {}}
+
+def save_processed_data(data):
+    """Save processed message data to file with error handling."""
+    try:
+        with open(PROCESSED_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except IOError as e:
+        print(f"Error saving processed data: {e}")
+
 def checkAndCreate():
-	detour = False
-	replytext = "Update from /u/spawnofyanni, June 15:\n\nHi there. I'm currently redirecting all DMs sent to /u/matchthreadder to this automated message. ESPN seems to have gone through a major backend redesign, which means that all of the code that runs this bot was just made obsolete. I'm going to spend a little time figuring out how bad this problem is, and will post an update on what this means as soon as I can. In the mean time, I'd recommend making a thread manually."
-	if len(activeThreads) > 0:		
-		print(getTimestamp() + "Checking messages...")
-	delims = [' x ',' - ',' v ',' vs ']
-	#unread_messages = []
-	subdel = ' for '
-	for msg in r.inbox.unread(limit=None):
-		msg.mark_read()
-		print(msg)
-		#	unread_messages.append(msg)
-		sub = subreddit
-		if msg.subject.lower() == 'mtdirect':
-			if detour and msg.author.name != admin:
-				#replytext = '/u/MatchThreadder is down for maintenance (starting Dec 5). The bot should be back up in a few days. Keep an eye out for when it starts posting threads again - message /u/spawnofyanni if you have any questions!\n\n--------------\n\n[Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you want to know how to make your own match thread.'
-				msg.reply(body=replytext)
-			else:
-				subreq = msg.body.split(subdel,2)
-				if subreq[0] != msg.body:
-					sub = subreq[1].split('/')[-1]
-					sub = sub.lower()
-					sub = sub.strip()
-				threadStatus,thread_id = createNewThread('','',msg.author.name,sub,subreq[0],'reg')
-				if messaging:
-					replytext = ""
-					if threadStatus == 0: # thread created successfully
-						replytext = "[Here](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") is a link to the thread you've requested. Thanks for using this bot!\n\n-------------------------\n\n*Did I create a thread for the wrong match? [Click here and press send](http://www.reddit.com/message/compose/?to=" + username + "&subject=delete&message=" + thread_id + ") to delete the thread (note: this will only work within five minutes of the thread's creation). This probably means that I can't find the right match - sorry!*"
-					if threadStatus == 1: # not found
-						replytext = "Sorry, I couldn't find info for that match. If the match you requested appears on [this page](http://www.espn.com/soccer/scores), please let /u/spawnofyanni know about this error.\n\n-------------------------\n\n*Why not run your own match thread? [Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you're not sure how.*\n\n*You could also check out these match thread creation tools from /u/afito and /u/Mamu7490:*\n\n*[RES Templates](https://www.reddit.com/r/soccer/comments/3ndd7b/matchthreads_for_beginners_the_easy_way/)*\n\n*[MTmate](https://www.reddit.com/r/soccer/comments/3huyut/release_v09_of_mtmate_matchthread_generator/)*"
-					if threadStatus == 2: # before kickoff
-						replytext = "Please wait until at least 5 minutes to kickoff to send me a thread request, just in case someone does end up making one themselves. Thanks!\n\n-------------------------\n\n*Why not run your own match thread? [Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you're not sure how.*\n\n*You could also check out these match thread creation tools from /u/afito and /u/Mamu7490:*\n\n*[RES Templates](https://www.reddit.com/r/soccer/comments/3ndd7b/matchthreads_for_beginners_the_easy_way/)*\n\n*[MTmate](https://www.reddit.com/r/soccer/comments/3huyut/release_v09_of_mtmate_matchthread_generator/)*"
-					if threadStatus == 3: # after full time - probably found the wrong match
-						replytext = "Sorry, I couldn't find a currently live match with those teams - are you sure the match has started (and hasn't finished)? If you think this is a mistake, it probably means I can't find that match.\n\n-------------------------\n\n*Why not run your own match thread? [Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you're not sure how.*\n\n*You could also check out these match thread creation tools from /u/afito and /u/Mamu7490:*\n\n*[RES Templates](https://www.reddit.com/r/soccer/comments/3ndd7b/matchthreads_for_beginners_the_easy_way/)*\n\n*[MTmate](https://www.reddit.com/r/soccer/comments/3huyut/release_v09_of_mtmate_matchthread_generator/)*"
-					if threadStatus == 4: # thread already exists
-						replytext = "There is already a [match thread](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") for that game. Join the discussion there!"
-					if threadStatus == 5: # invalid subreddit
-						replytext = "Sorry, I couldn't post to /r/" + sub + ". It may not exist, or I may have hit a posting limit."
-					if threadStatus == 6: # sub blacklisted
-						replytext = "Sorry, I can't post to /r/" + sub + ". Please message /u/" + admin + " if you think this is a mistake."
-					msg.reply(body=replytext)
-					
-		if msg.subject.lower() == 'match thread' or msg.subject.lower() == 'serious match thread':
-			type = 'reg'
-			if msg.subject.lower() == 'serious match thread':
-				type = 'srs'
-			if detour and msg.author.name != admin:
-				#replytext = '/u/MatchThreadder is down for maintenance (starting Dec 5). The bot should be back up in a few days. Keep an eye out for when it starts posting threads again - message /u/spawnofyanni if you have any questions!\n\n--------------\n\n[Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you want to know how to make your own match thread.'
-				msg.reply(body=replytext)
-			else:
-				subreq = msg.body.split(subdel,2)
-				if subreq[0] != msg.body:
-					sub = subreq[1].split('/')[-1]
-					sub = sub.lower()
-					sub = sub.strip()
-					print(sub)
-				if subreq[0].strip().isdigit():
-					threadStatus,thread_id = createNewThread('','',msg.author.name,sub,subreq[0].strip(),type)
-				else:
-					teams = firstTryTeams(subreq[0].strip())
-					for delim in delims:
-						attempt = subreq[0].split(delim,2)
-						if attempt[0] != subreq[0]:
-							teams = attempt
-					threadStatus,thread_id = createNewThread(teams[0],teams[1],msg.author.name,sub,'',type)
-				if messaging:
-					replytext = ""
-					if threadStatus == 0: # thread created successfully
-						replytext = "[Here](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") is a link to the thread you've requested. Thanks for using this bot!\n\n-------------------------\n\n*Did I create a thread for the wrong match? [Click here and press send](http://www.reddit.com/message/compose/?to=" + username + "&subject=delete&message=" + thread_id + ") to delete the thread (note: this will only work within five minutes of the thread's creation). This probably means that I can't find the right match - sorry!*"
-						if notify:
-							r.send_message(admin,"Match thread request fulfilled","/u/" + msg.author.name + " requested " + teams[0] + " vs " + teams[1] + " in /r/" + sub + ". \n\n[Thread link](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") | [Deletion link](http://www.reddit.com/message/compose/?to=" + username + "&subject=delete&message=" + thread_id + ")")
-					if threadStatus == 1: # not found
-						replytext = "Sorry, I couldn't find info for that match. If the match you requested appears on [this page](http://www.espn.com/soccer/scores), please let /u/spawnofyanni know about this error.\n\n-------------------------\n\n*Note: Have you tried requesting this thread using the [ESPN match ID](https://i.imgur.com/qNkrV5W.png)? This method of requesting threads can work better than referencing team names. [Click here](https://www.reddit.com/r/soccer/comments/bd30gq/matchthreadder_update_a_new_way_to_request_threads/) for more information.*"
-					if threadStatus == 2: # before kickoff
-						replytext = "Please wait until at least 5 minutes to kickoff to send me a thread request, just in case someone does end up making one themselves. Thanks!\n\n-------------------------\n\n*Why not run your own match thread? [Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you're not sure how.*\n\n*You could also check out these match thread creation tools from /u/afito and /u/Mamu7490:*\n\n*[RES Templates](https://www.reddit.com/r/soccer/comments/3ndd7b/matchthreads_for_beginners_the_easy_way/)*\n\n*[MTmate](https://www.reddit.com/r/soccer/comments/3huyut/release_v09_of_mtmate_matchthread_generator/)*"
-					if threadStatus == 3: # after full time - probably found the wrong match
-						replytext = "Sorry, I couldn't find a currently live match with those teams - are you sure the match has started (and hasn't finished)?\n\n-------------------------\n\n*Note: If you think this is a mistake, it probably means I can't find that match. Have you tried requesting this thread using the [ESPN match ID](https://i.imgur.com/qNkrV5W.png)? This method of requesting threads can work better than referencing team names. [Click here](https://www.reddit.com/r/soccer/comments/bd30gq/matchthreadder_update_a_new_way_to_request_threads/) for more information.*"
-					if threadStatus == 4: # thread already exists
-						replytext = "There is already a [match thread](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") for that game. Join the discussion there!"
-					if threadStatus == 5: # invalid subreddit
-						replytext = "Sorry, I couldn't post to /r/" + sub + ". It may not exist, or I may have hit a posting limit."
-					if threadStatus == 6: # sub blacklisted
-						replytext = "Sorry, I can't post to /r/" + sub + ". Please message /u/" + admin + " if you think this is a mistake."
-					if threadStatus == 7: # thread limit
-						replytext = "Sorry, you can only have one active thread request at a time."
-					if threadStatus == 8: # status set to red
-						replytext = "Sorry, the bot is currently unable to post threads. Check with /u/" + admin + " for more info; this should hopefully be resolved soon."
-					msg.reply(body=replytext)		
-					
-		if msg.subject.lower() in ['match info', 'match information']:
-			if detour:
-				#replytext = '/u/MatchThreadder is down for maintenance (starting Dec 5). The bot should be back up in a few days. Keep an eye out for when it starts posting threads again - message /u/spawnofyanni if you have any questions!\n\n--------------\n\n[Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you want to know how to make your own match thread.'
-				msg.reply(body=replytext)
-			else:
-				replytext = ""
-				teams = firstTryTeams(msg.body)
-				for delim in delims:
-					attempt = msg.body.split(delim,2)
-					if attempt[0] != msg.body:
-						teams = attempt
-				threadStatus,text = createMatchInfo(teams[0],teams[1])
-				print(getTimestamp() + f"Grabbing Match info for {teams[0]} vs {teams[1]}")
-				if threadStatus == 0: # successfully found info
-					replytext = "Below is the information for the match you've requested.\n\nIf you're using [RES](http://redditenhancementsuite.com/), you can use the 'source' button below this message to copy/paste the exact formatting code. If you aren't, you'll have to add the formatting yourself.\n\n----------\n\n" + text
-				if threadStatus == 1: # not found
-					replytext = "Sorry, I couldn't find info for that match. In the future I'll account for more matches around the world."
-				msg.reply(body=replytext)
-				print(getTimestamp() + replytext if threadStatus != 0 else "Match Info Sent")
-		
-		if msg.subject.lower() == 'delete':
-			if msg.author.name == admin:
-				name = deleteThread(msg.body)
-				if messaging:
-					replytext = ""
-					if name != '':
-						replytext = "Deleted " + name
-					else:
-						replytext = "Thread not found"
-					msg.reply(body=replytext)
-			else:
-				name = removeWrongThread(msg.body,msg.author.name)
-				if messaging:
-					if name == 'thread':
-						replytext = "Thread not found - please double-check thread ID"
-					elif name == 'time':
-						replytext = "This thread is more than five minutes old - thread deletion from now is an admin feature only. You can message /u/" + admin + " if you'd still like the thread to be deleted."
-					elif name == 'req':
-						replytext = "Username not recognised. Only the thread requester and bot admin have access to this feature."
-					else:
-						replytext = "Deleted " + name
-					msg.reply(body=replytext)
-	if len(activeThreads) > 0:						
-		print(getTimestamp() + "All messages checked.")
-	#r.inbox.mark_read(unread_messages)
+    # Load existing processed data
+    processed_data = load_processed_data()
+    processed_messages = processed_data.setdefault("processed_messages", {})
+    user_last_request = processed_data.setdefault("user_last_request", {})
+
+    detour = False
+    replytext = "Update from /u/spawnofyanni, June 15:\n\nHi there. I'm currently redirecting all DMs sent to /u/matchthreadder to this automated message. ESPN seems to have gone through a major backend redesign, which means that all of the code that runs this bot was just made obsolete. I'm going to spend a little time figuring out how bad this problem is, and will post an update on what this means as soon as I can. In the mean time, I'd recommend making a thread manually."
+    
+    if len(activeThreads) > 0:        
+        print(getTimestamp() + "Checking messages...")
+    
+    delims = [' x ',' - ',' v ',' vs ']
+    subdel = ' for '
+    
+    for chat in r.inbox.messages(limit=None):
+        if not isinstance(chat, praw.models.Conversation):
+            continue
+            
+        msg = chat.messages[-1]
+        msg_id = msg.id
+        user = msg.author.name
+        
+        if msg_id in processed_messages:
+            continue
+            
+        sub = subreddit
+        
+        if msg.subject.lower() == 'mtdirect':
+            if detour and user != admin:
+                chat.reply(body=replytext)
+            else:
+                subreq = msg.body.split(subdel,2)
+                if subreq[0] != msg.body:
+                    sub = subreq[1].split('/')[-1]
+                    sub = sub.lower()
+                    sub = sub.strip()
+                threadStatus,thread_id = createNewThread('','',user,sub,subreq[0],'reg')
+                if messaging:
+                    replytext = ""
+                    if threadStatus == 0: # thread created successfully
+                        replytext = "[Here](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") is a link to the thread you've requested. Thanks for using this bot!\n\n-------------------------\n\n*Did I create a thread for the wrong match? [Click here and press send](http://www.reddit.com/message/compose/?to=" + username + "&subject=delete&message=" + thread_id + ") to delete the thread (note: this will only work within five minutes of the thread's creation). This probably means that I can't find the right match - sorry!*"
+                    if threadStatus == 1: # not found
+                        replytext = "Sorry, I couldn't find info for that match. If the match you requested appears on [this page](http://www.espn.com/soccer/scores), please let /u/spawnofyanni know about this error.\n\n-------------------------\n\n*Why not run your own match thread? [Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you're not sure how.*\n\n*You could also check out these match thread creation tools from /u/afito and /u/Mamu7490:*\n\n*[RES Templates](https://www.reddit.com/r/soccer/comments/3ndd7b/matchthreads_for_beginners_the_easy_way/)*\n\n*[MTmate](https://www.reddit.com/r/soccer/comments/3huyut/release_v09_of_mtmate_matchthread_generator/)*"
+                    if threadStatus == 2: # before kickoff
+                        replytext = "Please wait until at least 5 minutes to kickoff to send me a thread request, just in case someone does end up making one themselves. Thanks!\n\n-------------------------\n\n*Why not run your own match thread? [Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you're not sure how.*\n\n*You could also check out these match thread creation tools from /u/afito and /u/Mamu7490:*\n\n*[RES Templates](https://www.reddit.com/r/soccer/comments/3ndd7b/matchthreads_for_beginners_the_easy_way/)*\n\n*[MTmate](https://www.reddit.com/r/soccer/comments/3huyut/release_v09_of_mtmate_matchthread_generator/)*"
+                    if threadStatus == 3: # after full time - probably found the wrong match
+                        replytext = "Sorry, I couldn't find a currently live match with those teams - are you sure the match has started (and hasn't finished)? If you think this is a mistake, it probably means I can't find that match.\n\n-------------------------\n\n*Why not run your own match thread? [Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you're not sure how.*\n\n*You could also check out these match thread creation tools from /u/afito and /u/Mamu7490:*\n\n*[RES Templates](https://www.reddit.com/r/soccer/comments/3ndd7b/matchthreads_for_beginners_the_easy_way/)*\n\n*[MTmate](https://www.reddit.com/r/soccer/comments/3huyut/release_v09_of_mtmate_matchthread_generator/)*"
+                    if threadStatus == 4: # thread already exists
+                        replytext = "There is already a [match thread](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") for that game. Join the discussion there!"
+                    if threadStatus == 5: # invalid subreddit
+                        replytext = "Sorry, I couldn't post to /r/" + sub + ". It may not exist, or I may have hit a posting limit."
+                    if threadStatus == 6: # sub blacklisted
+                        replytext = "Sorry, I can't post to /r/" + sub + ". Please message /u/" + admin + " if you think this is a mistake."
+                    chat.reply(body=replytext)
+                    
+        elif msg.subject.lower() == 'match thread' or msg.subject.lower() == 'serious match thread':
+            type = 'reg'
+            if msg.subject.lower() == 'serious match thread':
+                type = 'srs'
+            if detour and user != admin:
+                chat.reply(body=replytext)
+            else:
+                subreq = msg.body.split(subdel,2)
+                if subreq[0] != msg.body:
+                    sub = subreq[1].split('/')[-1]
+                    sub = sub.lower()
+                    sub = sub.strip()
+                    print(sub)
+                if subreq[0].strip().isdigit():
+                    threadStatus,thread_id = createNewThread('','',user,sub,subreq[0].strip(),type)
+                else:
+                    teams = firstTryTeams(subreq[0].strip())
+                    for delim in delims:
+                        attempt = subreq[0].split(delim,2)
+                        if attempt[0] != subreq[0]:
+                            teams = attempt
+                    threadStatus,thread_id = createNewThread(teams[0],teams[1],user,sub,'',type)
+                if messaging:
+                    replytext = ""
+                    if threadStatus == 0: # thread created successfully
+                        replytext = "[Here](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") is a link to the thread you've requested. Thanks for using this bot!\n\n-------------------------\n\n*Did I create a thread for the wrong match? [Click here and press send](http://www.reddit.com/message/compose/?to=" + username + "&subject=delete&message=" + thread_id + ") to delete the thread (note: this will only work within five minutes of the thread's creation). This probably means that I can't find the right match - sorry!*"
+                        if notify:
+                            r.send_message(admin,"Match thread request fulfilled","/u/" + user + " requested " + teams[0] + " vs " + teams[1] + " in /r/" + sub + ". \n\n[Thread link](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") | [Deletion link](http://www.reddit.com/message/compose/?to=" + username + "&subject=delete&message=" + thread_id + ")")
+                    if threadStatus == 1: # not found
+                        replytext = "Sorry, I couldn't find info for that match. If the match you requested appears on [this page](http://www.espn.com/soccer/scores), please let /u/spawnofyanni know about this error.\n\n-------------------------\n\n*Note: Have you tried requesting this thread using the [ESPN match ID](https://i.imgur.com/qNkrV5W.png)? This method of requesting threads can work better than referencing team names. [Click here](https://www.reddit.com/r/soccer/comments/bd30gq/matchthreadder_update_a_new_way_to_request_threads/) for more information.*"
+                    if threadStatus == 2: # before kickoff
+                        replytext = "Please wait until at least 5 minutes to kickoff to send me a thread request, just in case someone does end up making one themselves. Thanks!\n\n-------------------------\n\n*Why not run your own match thread? [Look here](https://www.reddit.com/r/soccer/wiki/matchthreads) for templates, tips, and example match threads from the past if you're not sure how.*\n\n*You could also check out these match thread creation tools from /u/afito and /u/Mamu7490:*\n\n*[RES Templates](https://www.reddit.com/r/soccer/comments/3ndd7b/matchthreads_for_beginners_the_easy_way/)*\n\n*[MTmate](https://www.reddit.com/r/soccer/comments/3huyut/release_v09_of_mtmate_matchthread_generator/)*"
+                    if threadStatus == 3: # after full time - probably found the wrong match
+                        replytext = "Sorry, I couldn't find a currently live match with those teams - are you sure the match has started (and hasn't finished)?\n\n-------------------------\n\n*Note: If you think this is a mistake, it probably means I can't find that match. Have you tried requesting this thread using the [ESPN match ID](https://i.imgur.com/qNkrV5W.png)? This method of requesting threads can work better than referencing team names. [Click here](https://www.reddit.com/r/soccer/comments/bd30gq/matchthreadder_update_a_new_way_to_request_threads/) for more information.*"
+                    if threadStatus == 4: # thread already exists
+                        replytext = "There is already a [match thread](http://www.reddit.com/r/" + sub + "/comments/" + thread_id + ") for that game. Join the discussion there!"
+                    if threadStatus == 5: # invalid subreddit
+                        replytext = "Sorry, I couldn't post to /r/" + sub + ". It may not exist, or I may have hit a posting limit."
+                    if threadStatus == 6: # sub blacklisted
+                        replytext = "Sorry, I can't post to /r/" + sub + ". Please message /u/" + admin + " if you think this is a mistake."
+                    if threadStatus == 7: # thread limit
+                        replytext = "Sorry, you can only have one active thread request at a time."
+                    if threadStatus == 8: # status set to red
+                        replytext = "Sorry, the bot is currently unable to post threads. Check with /u/" + admin + " for more info; this should hopefully be resolved soon."
+                    chat.reply(body=replytext)        
+                    
+        elif msg.subject.lower() in ['match info', 'match information']:
+            if detour:
+                chat.reply(body=replytext)
+            else:
+                replytext = ""
+                teams = firstTryTeams(msg.body)
+                for delim in delims:
+                    attempt = msg.body.split(delim,2)
+                    if attempt[0] != msg.body:
+                        teams = attempt
+                threadStatus,text = createMatchInfo(teams[0],teams[1])
+                print(getTimestamp() + f"Grabbing Match info for {teams[0]} vs {teams[1]}")
+                if threadStatus == 0: # successfully found info
+                    replytext = "Below is the information for the match you've requested.\n\nIf you're using [RES](http://redditenhancementsuite.com/), you can use the 'source' button below this message to copy/paste the exact formatting code. If you aren't, you'll have to add the formatting yourself.\n\n----------\n\n" + text
+                if threadStatus == 1: # not found
+                    replytext = "Sorry, I couldn't find info for that match. In the future I'll account for more matches around the world."
+                chat.reply(body=replytext)
+                print(getTimestamp() + replytext if threadStatus != 0 else "Match Info Sent")
+        
+        elif msg.subject.lower() == 'delete':
+            if user == admin:
+                name = deleteThread(msg.body)
+                if messaging:
+                    replytext = ""
+                    if name != '':
+                        replytext = "Deleted " + name
+                    else:
+                        replytext = "Thread not found"
+                    chat.reply(body=replytext)
+            else:
+                name = removeWrongThread(msg.body,user)
+                if messaging:
+                    if name == 'thread':
+                        replytext = "Thread not found - please double-check thread ID"
+                    elif name == 'time':
+                        replytext = "This thread is more than five minutes old - thread deletion from now is an admin feature only. You can message /u/" + admin + " if you'd still like the thread to be deleted."
+                    elif name == 'req':
+                        replytext = "Username not recognised. Only the thread requester and bot admin have access to this feature."
+                    else:
+                        replytext = "Deleted " + name
+                    chat.reply(body=replytext)
+
+        processed_messages[msg_id] = {
+            "user": user,
+            "subject": msg.subject.lower(),
+            "timestamp": time.time(),
+            "body_snippet": msg.body[:100]
+        }
+        user_last_request[user] = time.time()
+        save_processed_data(processed_data)
+    
+    if len(activeThreads) > 0:                        
+        print(getTimestamp() + "All messages checked.")
 				
 def getExtraInfo(matchID):
     try:

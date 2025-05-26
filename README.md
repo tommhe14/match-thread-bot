@@ -19,7 +19,7 @@ The fifth detail, the bot's user agent, should be provided as per [reddit's API 
 mtb.py
 -----
 
-In this file is the code used to run MatchThreadder - as long as you change the login.txt file appropriately, you should be able to run this file in its current form to have your own subreddit-specific version of the bot, although I haven't tested that at all. The bot checks for new messages every 60 seconds, and if any messages are titled 'Match Thread' or 'Match Info' it will attempt to find the appropriate info about that match.
+In this file is the code used to run MatchThreadder - as long as you change the login.json file appropriately, you should be able to run this file in its current form to have your own subreddit-specific version of the bot, although I haven't tested that at all. The bot checks for new messages every 60 seconds, and if any messages are titled 'Match Thread' or 'Match Info' it will attempt to find the appropriate info about that match.
 
 If/when the bot runs into any HTTP errors (reddit is down, can't access goal.com, etc) it will sleep for 2 minutes and try again.
 
